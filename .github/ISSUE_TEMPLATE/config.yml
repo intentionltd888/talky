@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 想幫忙測 / Want to help test
+    url: https://github.com/intentionltd888/talky/blob/main/TESTING.md
+    about: 25 條測試清單，每條只要「做一個動作、看一個結果」 / 25 items, each "do one thing, see one result"
+  - name: 叫 AI 幫你裝 / Let an AI set it up
+    url: https://github.com/intentionltd888/talky/blob/main/AGENTS.md
+    about: 把這份貼給你自己的 AI，它會一步一步帶你 / Paste this to your own AI assistant and it walks you through

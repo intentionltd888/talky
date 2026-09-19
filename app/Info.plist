@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDisplayName</key>
+	<string>Talky</string>
+	<key>CFBundleExecutable</key>
+	<string>Talky</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>ltd.intention.talky</string>
+	<key>CFBundleName</key>
+	<string>Talky</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.9</string>
+	<key>CFBundleVersion</key>
+	<string>20</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>LSUIElement</key>
+	<false/>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Talky 只在你按下「在終端機執行」時，替你打開終端機並貼上安裝或登入指令。</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Talky 需要麥克風，才能把你講的話變成文字。聲音只在這台電腦上處理。</string>
+</dict>
+</plist>

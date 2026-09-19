@@ -1,0 +1,31 @@
+# 引擎二進位：不散布在原始碼倉裡（用 scripts/vendor-fetch.sh 準備）
+vendor/
+
+# 建置產物（含 TALKY_BUILD_DIR 另開的 build-0.1.3/、build-0.1.4/ 等）
+build/
+build-*/
+
+# 備份與系統雜物
+*.bak
+*.bak-*
+.DS_Store
+
+# 品牌與行銷資產：不進公開倉
+上線資產/
+
+# 截圖／示範過程檔（官網截圖、demo 模式輸出）
+demo-shots/
+*.log
+
+# 內部歷程（被取代的舊碼、實驗補丁）：留在本機，不進公開倉
+_archive/
+app/_archive/
+
+# 機器本地設定與憑證：永遠不進倉
+.notary-profile
+.env
+.env.*
+*.p12
+*.mobileprovision
+.claude/
+CLAUDE.md

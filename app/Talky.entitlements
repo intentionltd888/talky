@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- hardened runtime 下非沙盒 app 的麥克風存取（少這條＝簽名版收不到麥克風） -->
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+	<!-- 「在終端機執行」用 AppleScript 開 Terminal；hardened runtime 少這條會被拒 -->
+	<key>com.apple.security.automation.apple-events</key>
+	<true/>
+</dict>
+</plist>
