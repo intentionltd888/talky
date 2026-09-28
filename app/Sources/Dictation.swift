@@ -12,6 +12,7 @@
 import AVFoundation
 import AppKit
 import Carbon.HIToolbox
+import AudioToolbox
 import SwiftUI
 
 // ── 設定 ────────────────────────────────────────────────────
@@ -81,6 +82,13 @@ enum Dictation {
     static var showStatusLight: Bool {
         get { UserDefaults.standard.object(forKey: "statusLight") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "statusLight") }
+    }
+
+    /// Dock 圖示（GitHub issue #1：只用快捷鍵叫 Talky 的人，想把 Dock 留給常用的 app）。
+    /// 關掉＝不在 Dock、不在 ⌘Tab；入口改成選單列狀態燈（這時狀態燈鎖在開）或從 Spotlight／啟動台再打開一次。
+    static var showInDock: Bool {
+        get { UserDefaults.standard.object(forKey: "showInDock") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "showInDock") }
     }
 
     /// 外觀：跟系統／淺色／深色（要能手動切黑白，不只跟系統）
@@ -904,72 +912,105 @@ final class TalkyServers {
 // ── 麥克風錄音（16k mono s16，累積在記憶體）────────────────
 
 final class TalkyRecorder {
-    private let engine = AVAudioEngine()
-    private var converter: AVAudioConverter?
-    private var converterInFormat: AVAudioFormat?
-    private let outFormat = AVAudioFormat(
-        commonFormat: .pcmFormatInt16, sampleRate: 16000, channels: 1, interleaved: true)!
+    // 病史：原本用 AVAudioEngine。它在 macOS 一碰 inputNode 就把「預設輸入＋預設輸出」組成聚合裝置：
+    // 預設輸出（DisplayPort 螢幕）的音訊卡住時，輕則每次等 10 秒後「麥克風啟動失敗」，重則主執行緒卡在
+    // 查聚合裝置的子裝置裡出不來（系統音訊服務空轉，整個 Talky 凍住、連「結束」都叫不動）。
+    // 改用 AudioQueue：只開輸入裝置、完全不碰輸出，直接要 16kHz 單聲道 Int16（取樣率由系統轉）。
+    private var queue: AudioQueueRef?
+    private let cbQueue = DispatchQueue(label: "ltd.intention.talky.mic", qos: .userInitiated)
     private var pcm = Data()
     /// 本次口述收到的最大音量（0–1）——用來分辨「真的沒聲音」vs「有聲音但引擎沒回」
     private var peak: Float = 0
     /// 即時音量（0–1，帶衰減；面板音量槽用）
     private var level: Float = 0
+    private var stopped = false
     private let lock = NSLock()
 
     func start() throws {
+        lock.lock()
         pcm.removeAll(keepingCapacity: true)
         peak = 0
-        let input = engine.inputNode
-        let inFormat = input.inputFormat(forBus: 0)
-        guard inFormat.sampleRate > 0 else { throw TalkyError("找不到麥克風輸入裝置") }
-        TalkyLog.write("mic sr=\(Int(inFormat.sampleRate))")
-        converter = AVAudioConverter(from: inFormat, to: outFormat)
-        converterInFormat = inFormat
-        input.installTap(onBus: 0, bufferSize: 4096, format: inFormat) { [weak self] buf, _ in
+        stopped = false
+        lock.unlock()
+        var fmt = AudioStreamBasicDescription(
+            mSampleRate: 16000, mFormatID: kAudioFormatLinearPCM,
+            mFormatFlags: kLinearPCMFormatFlagIsSignedInteger | kLinearPCMFormatFlagIsPacked,
+            mBytesPerPacket: 2, mFramesPerPacket: 1, mBytesPerFrame: 2, mChannelsPerFrame: 1,
+            mBitsPerChannel: 16, mReserved: 0)
+        var q: AudioQueueRef?
+        var st = AudioQueueNewInputWithDispatchQueue(&q, &fmt, 0, cbQueue) { [weak self] aq, buf, _, _, _ in
             guard let self else { return }
-            if self.converterInFormat != buf.format {
-                self.converter = AVAudioConverter(from: buf.format, to: self.outFormat)
-                self.converterInFormat = buf.format
-            }
-            guard let conv = self.converter else { return }
-            let cap =
-                AVAudioFrameCount(Double(buf.frameLength) * 16000 / buf.format.sampleRate) + 32
-            guard let out = AVAudioPCMBuffer(pcmFormat: self.outFormat, frameCapacity: cap)
-            else { return }
-            var consumed = false
-            var err: NSError?
-            conv.convert(to: out, error: &err) { _, status in
-                if consumed {
-                    status.pointee = .noDataNow
-                    return nil
-                }
-                consumed = true
-                status.pointee = .haveData
-                return buf
-            }
-            if out.frameLength > 0, let ch = out.int16ChannelData {
-                var maxAbs: Int16 = 0
-                for i in 0..<Int(out.frameLength) {
-                    let v = ch[0][i]
-                    let a = v == Int16.min ? Int16.max : abs(v)  // abs(-32768) 會 trap
-                    if a > maxAbs { maxAbs = a }
-                }
-                let bytes = Data(
-                    bytes: ch[0], count: Int(out.frameLength) * MemoryLayout<Int16>.size)
-                self.lock.lock()
-                self.pcm.append(bytes)
-                let p = Float(maxAbs) / 32768.0
-                if p > self.peak { self.peak = p }
-                self.level = max(p, self.level * 0.82)
-                self.lock.unlock()
-            }
+            self.consume(buf)
+            self.lock.lock()
+            let done = self.stopped
+            self.lock.unlock()
+            if !done { AudioQueueEnqueueBuffer(aq, buf, 0, nil) }
         }
-        try engine.start()
+        guard st == noErr, let q else { throw TalkyError("找不到麥克風輸入裝置（\(st)）") }
+        // 每格 50 毫秒：停止時最多只掉最後這一小格（按停之前通常已經靜音）
+        for _ in 0..<4 {
+            var b: AudioQueueBufferRef?
+            if AudioQueueAllocateBuffer(q, 1600, &b) == noErr, let b { AudioQueueEnqueueBuffer(q, b, 0, nil) }
+        }
+        st = AudioQueueStart(q, nil)
+        guard st == noErr else {
+            AudioQueueDispose(q, true)
+            throw TalkyError("麥克風啟動失敗（\(st)）")
+        }
+        lock.lock()
+        queue = q
+        let abandoned = stopped  // 啟動拖太久、呼叫端已經放棄＝起來了也馬上關
+        lock.unlock()
+        TalkyLog.write("mic aq 16k")
+        if abandoned { stop() }
+    }
+
+    private func consume(_ buf: AudioQueueBufferRef) {
+        let n = Int(buf.pointee.mAudioDataByteSize) / 2
+        guard n > 0 else { return }
+        let p = buf.pointee.mAudioData.assumingMemoryBound(to: Int16.self)
+        var maxAbs: Int16 = 0
+        for i in 0..<n {
+            let v = p[i]
+            let a = v == Int16.min ? Int16.max : abs(v)  // abs(-32768) 會 trap
+            if a > maxAbs { maxAbs = a }
+        }
+        let bytes = Data(bytes: p, count: n * 2)
+        lock.lock()
+        pcm.append(bytes)
+        let pk = Float(maxAbs) / 32768.0
+        if pk > peak { peak = pk }
+        level = max(pk, level * 0.89)  // 每 50 毫秒衰減一次（原本每 85 毫秒 ×0.82）
+        lock.unlock()
     }
 
     func stop() {
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
+        lock.lock()
+        stopped = true
+        let q = queue
+        queue = nil
+        lock.unlock()
+        guard let q else { return }
+        AudioQueueStop(q, true)
+        cbQueue.sync {}  // 等還在跑的那一格回呼收完，再釋放
+        AudioQueueDispose(q, true)
+    }
+
+    /// 停止最多等 2 秒：系統音訊服務卡住時不讓主執行緒陪葬（錄到的音已經在記憶體裡）
+    func stopBounded(timeout: TimeInterval = 2) {
+        let sem = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .userInitiated).async {
+            self.stop()
+            sem.signal()
+        }
+        if sem.wait(timeout: .now() + timeout) == .timedOut { TalkyLog.write("mic stop timeout \(Int(timeout))s") }
+    }
+
+    /// 放棄這次啟動（呼叫端等不下去了）：之後才起來也會馬上關掉
+    func abandon() {
+        lock.lock()
+        stopped = true
+        lock.unlock()
     }
 
     var seconds: Double {
@@ -1513,6 +1554,8 @@ final class DictationController {
     private(set) var target: TranslateTarget = Translate.target
     /// 這一次口述開始時的前景 app（依 app 記語言用；面板不啟動 Talky，所以前景就是使用者在打字的 app）
     private var sessionApp: String?
+    /// 同上，但每種模式都記：prompt 模式要等半分鐘，交付時前景換了就不硬貼
+    private var startApp: String?
 
     /// 狀態變了就通知 UI（選單列狀態燈、狀態視窗）
     var onStateChange: (() -> Void)?
@@ -1544,6 +1587,7 @@ final class DictationController {
         switch state {
         case .idle:
             mode = m
+            startApp = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
             if m == .translate {
                 sessionApp = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
                 target = Translate.preselect(forApp: sessionApp)
@@ -1596,7 +1640,24 @@ final class DictationController {
         panel.showListening(mode: mode, target: target)
         DispatchQueue.global(qos: .userInitiated).async { TalkyServers.shared.startAll() }
         let r = TalkyRecorder()
-        do { try r.start() } catch {
+        // 麥克風在背景起、主執行緒最多等 3 秒。病史：系統音訊服務卡住時啟動會一直卡著，
+        // 放在主執行緒上等＝整個 Talky 凍住（熱鍵、面板、連「結束」都叫不動）。
+        final class StartResult { var error: Error? }
+        let result = StartResult()
+        let started = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .userInitiated).async {
+            do { try r.start() } catch { result.error = error }
+            started.signal()
+        }
+        if started.wait(timeout: .now() + 3) == .timedOut {
+            r.abandon()
+            TalkyLog.write("mic start timeout 3s（系統音訊服務沒回應）")
+            panel.error("麥克風 3 秒沒有回應：這台 Mac 的音訊服務卡住了，重開機通常就好。")
+            panel.hide(after: 6.0)
+            return
+        }
+        if let error = result.error {
+            TalkyLog.write("mic start fail: \(error)")  // 面板幾秒就消失，沒記下來就查不到是哪種失敗
             panel.error("麥克風啟動失敗：\(error.localizedDescription)")
             panel.hide(after: 4.0)
             return
@@ -1623,7 +1684,7 @@ final class DictationController {
         pollTimer = nil
         levelTimer?.invalidate()
         levelTimer = nil
-        recorder?.stop()
+        recorder?.stopBounded()
         recorder = nil
         state = .idle
         panel.hide()
@@ -1670,7 +1731,7 @@ final class DictationController {
         pollTimer = nil
         levelTimer?.invalidate()
         levelTimer = nil
-        r.stop()
+        r.stopBounded()
         panel.working("轉成文字中…")
         let durSecs = r.seconds
         let peak = r.peakAmplitude
@@ -1730,6 +1791,12 @@ final class DictationController {
                 self.finishTranslate(raw: raw, usedTail: usedTail)
                 return
             }
+            // prompt 模式：最後一句說了「整理成 prompt」這類話＝這次不整理，編成 prompt（只看右 ⌘ 這條；
+            // 寫給人的 app 不看）
+            if !PromptMode.isMessagingApp(self.startApp), let body = PromptMode.detect(raw) {
+                self.finishPrompt(body: body)
+                return
+            }
             // 潤飾
             var finalText = raw
             var path = PolishPath.raw
@@ -1785,6 +1852,52 @@ final class DictationController {
                 self.state = .idle
                 self.changed()
             }
+        }
+    }
+
+    /// prompt 模式的收尾（在背景執行緒被 stopAndProcess 呼叫）
+    private func finishPrompt(body: String) {
+        let app = startApp
+        TalkyLog.write("prompt 模式觸發：內容 \(body.count) 字")
+        guard !body.isEmpty else {
+            DispatchQueue.main.async {
+                self.panel.status("只聽到「整理成 prompt」，前面沒有內容可以編")
+                self.panel.hide(after: 2.6)
+                self.state = .idle
+                self.changed()
+            }
+            return
+        }
+        let viaClaude = PolishMode.current == .claudeCLI
+        DispatchQueue.main.async {
+            self.panel.working(
+                viaClaude ? "編成 prompt 中，用你的 Claude Code" : "包成 prompt 中",
+                eta: viaClaude ? "約 30 秒" : "")
+        }
+        let r = PromptMode.compile(body)
+        let out = TextUtil.normalizePunct(TextUtil.toTraditional(r.text))
+        DispatchQueue.main.async {
+            // 等了半分鐘，他可能已經切到別的 app：前景換了就別硬貼進去，改放剪貼簿
+            let pasted: Bool
+            if NSWorkspace.shared.frontmostApplication?.bundleIdentifier == app {
+                pasted = self.deliver(out)
+            } else {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(out, forType: .string)
+                pasted = false
+            }
+            Memo.shared.add(out, pasted: pasted)
+            if r.compiled {
+                if pasted { self.panel.pasted("已貼上 prompt") } else { self.panel.copied("prompt 已複製，按 ⌘V 貼上") }
+                self.panel.hide(after: pasted ? 1.2 : 4.0)
+            } else {
+                // 不靜默假裝成功：沒編成就講清楚貼出去的是什麼
+                self.panel.error(
+                    (pasted ? "已貼上" : "已複製（按 ⌘V 貼上）") + "原話＋整理指令，沒有編成 prompt：\(r.why ?? "")")
+                self.panel.hide(after: 6.0)
+            }
+            self.state = .idle
+            self.changed()
         }
     }
 
@@ -1892,21 +2005,29 @@ final class DictationController {
                 // 遠端用戶端靠 flagsChanged 型事件追修飾鍵狀態——用 keyDown 模擬會被無視。
                 // 發與實體鍵盤同型別的序列，並拉開間距讓轉送端來得及更新修飾鍵狀態。
                 // 用左 ⌘（55）避開右 ⌘（54）的雙擊偵測。
+                // 病史：螢幕共享連 Mac mini，剪貼簿已經同步到遠端、⌘V 卻沒貼上。實體鍵盤按著左 ⌘ 時，旗標除了
+                // Command 還帶「哪一顆 ⌘」的裝置位元（左＝0x08）與非合併位元（0x100）；只帶 .maskCommand 的
+                // flagsChanged 對不上任何一顆實體鍵，遠端用戶端判不出 ⌘ 是按下還是放開。旗標與事件來源都照實體鍵盤給。
+                let hid = CGEventSource(stateID: .hidSystemState)
+                let held = CGEventFlags(rawValue: CGEventFlags.maskCommand.rawValue | 0x108)
+                let released = CGEventFlags(rawValue: 0x100)
+                TalkyLog.write(
+                    "remote paste → \(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "?") \(t.count) chars")
                 func post(
                     _ key: CGKeyCode, down: Bool, asFlags: Bool, flags: CGEventFlags,
                     after: TimeInterval
                 ) {
                     DispatchQueue.main.asyncAfter(deadline: .now() + after) {
-                        let e = CGEvent(keyboardEventSource: src, virtualKey: key, keyDown: down)
+                        let e = CGEvent(keyboardEventSource: hid, virtualKey: key, keyDown: down)
                         if asFlags { e?.type = .flagsChanged }
                         e?.flags = flags
                         e?.post(tap: .cghidEventTap)
                     }
                 }
-                post(55, down: true, asFlags: true, flags: .maskCommand, after: 0)
-                post(9, down: true, asFlags: false, flags: .maskCommand, after: 0.08)
-                post(9, down: false, asFlags: false, flags: .maskCommand, after: 0.16)
-                post(55, down: false, asFlags: true, flags: [], after: 0.24)
+                post(55, down: true, asFlags: true, flags: held, after: 0)
+                post(9, down: true, asFlags: false, flags: held, after: 0.08)
+                post(9, down: false, asFlags: false, flags: held, after: 0.16)
+                post(55, down: false, asFlags: true, flags: released, after: 0.24)
                 return
             }
             let down = CGEvent(keyboardEventSource: src, virtualKey: 9, keyDown: true)  // V

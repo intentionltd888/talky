@@ -20,6 +20,10 @@
 </p>
 
 <p align="center">
+  現況：v0.1.12（build 27）
+</p>
+
+<p align="center">
   <img src="docs/images/demo.gif" alt="連按兩下右 ⌘ → 講 → 再按一次，整理好的字貼進游標" width="760">
 </p>
 
@@ -79,6 +83,23 @@
   <img src="docs/images/panel_translate.png" alt="翻譯模式：點語言籤就翻成那種語言" width="640">
 </p>
 
+## Prompt 模式：講需求，貼出給 AI 的完整 prompt
+
+講完一段需求，最後加一句「**幫我整理成 prompt**」（「寫成提示詞」「變成更詳細的 prompt」都算），這一次就不做一般整理，改用你的 Claude Code 把整段話編成一份完整的 prompt：目標、為什麼要做、做到頂的具體標準、要避開的平庸做法、範圍、交付。約 30 秒，貼在游標處，看過再送出。
+
+- 放在最後一句說（後面可以再補一句收尾，例如「我們再來決定要怎麼做」）；講到一半提到 prompt、後面還有好幾句的不會觸發。在 LINE、訊息、Slack、Mail 這類寫給人的 app 裡也不會。
+- 「好一點」「高級」這類形容詞會被換成看成品就判斷得出有沒有做到的標準——這是它跟一般整理最大的不同。
+- 整理方式不是 Claude Code 時，貼「原話＋整理指令」，讓接收的 AI 自己編；面板會照實說。
+
+## iPhone 版連過來：用這台 Mac 的訂閱
+
+iPhone 版 Talky（開發中，`ios/`）要用你的 Claude Code／ChatGPT（Codex）訂閱整理與翻譯時，經由你自己的這台 Mac：
+設定 →「iPhone（用這台 Mac 的訂閱整理與翻譯）」→ 打開 → 用 iPhone 相機掃畫面上的 QR 碼。
+
+- 預設關；打開才聽 47810 埠，只接同一個網路或 Tailscale 裡、掃過 QR 碼的 iPhone。
+- 每個請求用配對金鑰加密＋驗證（ChaCha20-Poly1305），內容不經過任何第三方；「換一組配對碼」＝舊 iPhone 失效。
+- iPhone 不碰你的帳號：登入永遠在 Mac 上、走 Anthropic／OpenAI 自己的登入頁（Anthropic 不准第三方 app 直接登入 Claude 訂閱）。
+
 ## 官網介紹頁
 
 完整介紹在 [intentionltd888.github.io/made/talky](https://intentionltd888.github.io/made/talky/)：快多少、講得亂貼得乾淨、翻譯模式、聲音怎麼留在電腦裡、常見問題。
@@ -91,7 +112,7 @@
 
 ## 安裝
 
-1. [下載 Talky.dmg](https://github.com/intentionltd888/talky/releases/latest/download/Talky.dmg)，打開，把 Talky 拖進 Applications；或直接雙擊 DMG 裡的 Talky，它會自己放進「應用程式」、加進 Dock、然後打開。DMG 經 Developer ID 簽名與 Apple 公證，不會有安全警告。
+1. [下載 Talky.dmg](https://github.com/intentionltd888/talky/releases/latest/download/Talky.dmg)，打開，把 Talky 拖進 Applications；或直接雙擊 DMG 裡的 Talky，它會自己放進「應用程式」、加進 Dock、然後打開。DMG 經 Developer ID 簽名與 Apple 公證，不會有安全警告。不想讓它佔 Dock：設定 → 一般 →「Dock 與選單列」關掉「在 Dock 顯示 Talky」，之後從選單列的狀態燈打開它。
 2. 從 Applications 打開 Talky。第一次會跑五步精靈：麥克風 → 輔助使用 → 整理方式 → 試講一句 → 好了。要親手做的只有：按「允許」、去系統設定開一個開關、講一句話。
 3. **輔助使用不能跳**：沒開，連按右 ⌘ 完全不會有反應（偵測快捷鍵、把字貼進別的 app 都要它）。開完 app 會在 2 秒內自己接上。
 
@@ -125,6 +146,12 @@ open build/Talky.app
 
 /Applications/Talky.app/Contents/MacOS/Talky --ime-polish "呃就是那個我們明天下午三點要開會嘛,對對對"
 # 不開 UI、不收音，直接跑整理路由並印出結果與實際走的那一條
+
+/Applications/Talky.app/Contents/MacOS/Talky --ime-prompt "官網首頁要重做，重點是三秒看懂。幫我整理成 prompt"
+# 跑 prompt 模式的句尾判斷＋編譯，印出會貼上的 prompt
+
+open -n -a Talky --args --mic-test
+# 用 Talky 自己的麥克風權限錄 1.5 秒，結果寫在記錄檔最後一行
 ```
 
 引擎的 port 是 `127.0.0.1:8932`（語音）與 `127.0.0.1:8947`（本機整理），只綁 localhost。
@@ -135,7 +162,7 @@ open build/Talky.app
 |---|---|
 | 模型 | `~/Library/Application Support/Talky/models/` |
 | 常用詞 | `~/Library/Application Support/Talky/glossary.txt` |
-| 備忘錄（最近 20 句口述，點 Dock 圖示看） | 本機 `UserDefaults`，不出機器 |
+| 備忘錄（最近 20 句口述，點 Dock 圖示或選單列狀態燈看） | 本機 `UserDefaults`，不出機器 |
 | 記錄檔 | `~/Library/Logs/Talky/talky.log` |
 | 設定 | `defaults read ltd.intention.talky` |
 
@@ -153,7 +180,7 @@ open build/Talky.app
 ## 回報問題與參與
 
 - 出問題：設定 → 一般 → 「匯出診斷檔到桌面」，把那份 txt 附在 [issue](https://github.com/intentionltd888/talky/issues/new/choose) 裡（不含金鑰）。
-- 想幫忙測：照 [TESTING.md](TESTING.md) 走一遍，25 條，每條只要「做一個動作、看一個結果」。
+- 想幫忙測：照 [TESTING.md](TESTING.md) 走一遍，29 條，每條只要「做一個動作、看一個結果」。
 - 想改程式：先讀 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ## 追蹤我們

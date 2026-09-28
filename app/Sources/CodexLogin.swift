@@ -18,10 +18,16 @@ final class CodexLogin: ObservableObject {
     private var poll: Timer?
     private var startedAt = Date()
 
+    /// 登入成功後要不要把整理大腦換成 ChatGPT。
+    /// 設定頁按「登入」＝要用它（預設 true）；iPhone 叫的、或只是為了別的用途登入（例如生圖）＝不要動使用者選好的大腦
+    /// （實例：只為了生圖重登 ChatGPT，結果 Mac 的整理被悄悄換成 ChatGPT）
+    var bindOnSuccess = true
+
     /// 回傳 false＝這台沒有 codex（呼叫端先走 CodexInstall）
     @discardableResult
-    func start() -> Bool {
+    func start(bind: Bool = true) -> Bool {
         if running { return true }
+        bindOnSuccess = bind
         guard let bin = CodexCLI.binaryPath() else { return false }
         let p = Process()
         p.executableURL = URL(fileURLWithPath: bin)
@@ -110,10 +116,15 @@ final class CodexLogin: ObservableObject {
         running = false
         succeeded = ok
         if ok {
-            note = "登入成功，已接上你的 ChatGPT。"
-            TalkyLog.write("codex login ok → select codex")
             CodexCLI.resetLoginCache()
-            Brains.select(.codex)  // 登入完馬上綁定
+            if bindOnSuccess {
+                note = "登入成功，已接上你的 ChatGPT。"
+                TalkyLog.write("codex login ok → select codex")
+                Brains.select(.codex)  // 設定頁登入＝要用它，馬上綁定
+            } else {
+                note = "登入成功（整理大腦沒換，照你原本選的）。"
+                TalkyLog.write("codex login ok（不換大腦）")
+            }
         }
     }
 

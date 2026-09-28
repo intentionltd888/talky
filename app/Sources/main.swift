@@ -3,7 +3,8 @@
 // 任何文字框連按兩下右⌘講話，邊講邊出字，再按一次就把整理好的書面繁中貼進游標。
 // 整理預設用你自己的 Claude Code；沒有就用本機模型；都沒有也照樣貼原稿。
 //
-// app 形態：Dock 常駐（點圖示開狀態視窗）＋選單列一顆狀態燈（可在設定關）。
+// app 形態：Dock 常駐（點圖示開狀態視窗）＋選單列一顆狀態燈。兩樣都能在設定關，但至少留一個入口：
+// Dock 圖示關掉時狀態燈鎖在開（issue #1）；兩樣之外，從 Spotlight／啟動台再打開一次也會開狀態視窗。
 // 通知只在「引擎就緒」時跳一則；出錯一律顯示在浮動面板上，不發通知。
 //
 // 命令列（不開 UI）：
@@ -12,6 +13,9 @@
 //   Talky --autopick                            跑一次精靈的自動選整理方式並印結果（測試鉤）
 //   Talky --ime-translate ja <一句口述>         跑翻譯路由並印出譯文與守門結果（接線測試用）
 //   Talky --claude-install                      跑一次 app 內安裝 Claude Code 並印過程（測試鉤）
+//   Talky --mic-test                            錄 1.5 秒，看麥克風起不起得來（結果也寫進記錄檔）
+//   Talky --prompt-detect "<句子>" [更多句…]     只跑 prompt 模式的句尾判斷（不打大腦）
+//   Talky --ime-prompt "<口述＋整理成 prompt>"   判斷＋編譯，印出會貼上的 prompt（接線測試用）
 
 import AVFoundation
 import AppKit
@@ -66,6 +70,59 @@ if let idx = cliArgs.firstIndex(of: "--ime-polish"), idx + 1 < cliArgs.count {
     exit(0)
 }
 
+// ── CLI：--mic-test（錄 1.5 秒，不送辨識）──────────────────
+// 麥克風權限算在「誰把它開起來」頭上：從終端機直接跑＝借終端機的權限；
+// 要用 Talky 自己的權限就 `open -n -a Talky --args --mic-test`，結果看記錄檔最後一行。
+if cliArgs.contains("--mic-test") {
+    let r = TalkyRecorder()
+    let t0 = Date()
+    do {
+        try r.start()
+        Thread.sleep(forTimeInterval: 1.5)
+        r.stop()
+        let msg = String(
+            format: "mic-test ok：啟動加錄音 %.1f 秒，收到 %.1f 秒音訊，peak=%.3f",
+            Date().timeIntervalSince(t0), r.seconds, r.peakAmplitude)
+        print(msg)
+        TalkyLog.write(msg)
+        TalkyLog.flush()
+        exit(r.seconds > 0.5 ? 0 : 2)
+    } catch {
+        let msg = String(format: "mic-test fail（%.1f 秒）：", Date().timeIntervalSince(t0)) + "\(error)"
+        print(msg)
+        TalkyLog.write(msg)
+        TalkyLog.flush()
+        exit(1)
+    }
+}
+
+// ── CLI：--prompt-detect／--ime-prompt（prompt 模式接線測試）──────────
+if let idx = cliArgs.firstIndex(of: "--prompt-detect"), idx + 1 < cliArgs.count {
+    for raw in cliArgs[(idx + 1)...] {
+        if let body = PromptMode.detect(raw) {
+            print("觸發    \(raw)\n  → \(body.isEmpty ? "只有請求句，沒有內容可以編" : "整段 \(body.count) 字送去編")")
+        } else {
+            print("不觸發  \(raw)")
+        }
+    }
+    exit(0)
+}
+if let idx = cliArgs.firstIndex(of: "--ime-prompt"), idx + 1 < cliArgs.count {
+    let raw = cliArgs[(idx + 1)...].joined(separator: " ")
+    guard let body = PromptMode.detect(raw) else {
+        print("不觸發：句尾沒有「整理成 prompt」這類話")
+        exit(1)
+    }
+    print("mode=\(PolishMode.current.rawValue) model=\(PromptMode.model) effort=\(PromptMode.effort)")
+    let t0 = Date()
+    let r = PromptMode.compile(body)
+    print(String(format: "%@ %.1fs", r.compiled ? "OK" : "ENVELOPE", Date().timeIntervalSince(t0)))
+    print(TextUtil.normalizePunct(TextUtil.toTraditional(r.text)))
+    if let w = r.why { FileHandle.standardError.write("  （\(w)）\n".data(using: .utf8)!) }
+    TalkyLog.flush()
+    exit(r.compiled ? 0 : 3)
+}
+
 // ── CLI：--autopick（測試鉤：跑一次精靈的自動選，印選了哪顆；不動 UI）──
 if cliArgs.contains("--autopick") {
     let k = Brains.autoPick()
@@ -90,6 +147,7 @@ if cliArgs.contains("--claude-install") {
 }
 
 // ── CLI：--codex-setup（測試鉤：沒 codex 就 app 內下載、有就 app 內登入；印過程；最多等 --codex-secs 秒，預設 40）──
+// --no-bind：登入成功也不換整理大腦（只是為了別的用途登入 ChatGPT，例如生圖）
 if cliArgs.contains("--codex-setup") {
     let secs = cliArgs.firstIndex(of: "--codex-secs").flatMap { $0 + 1 < cliArgs.count ? Double(cliArgs[$0 + 1]) : nil } ?? 40
     let inst = CodexInstall.shared
@@ -101,7 +159,7 @@ if cliArgs.contains("--codex-setup") {
             exit(0)
         }
         print("codex 已在：\(CodexCLI.binaryPath() ?? "?")，直接登入")
-        guard login.start() else { print("login spawn fail"); exit(2) }
+        guard login.start(bind: !cliArgs.contains("--no-bind")) else { print("login spawn fail"); exit(2) }
     } else {
         guard inst.start() else { print("install spawn fail"); exit(2) }
     }
@@ -116,9 +174,11 @@ if cliArgs.contains("--codex-setup") {
     }
     print("install: running=\(inst.running) ok=\(inst.succeeded) fail=\(inst.failed) | login: running=\(login.running) ok=\(login.succeeded) url=\(login.url ?? "-")")
     print("codex=\(CodexCLI.binaryPath() ?? "nil") loggedIn=\(CodexCLI.loggedIn(force: true).map { String($0) } ?? "nil") polishMode=\(PolishMode.current.rawValue)")
+    // 先記下結果再收尾：cancel() 會把 succeeded 清掉（病史：登入成功卻回 exit 1）
+    let ok = login.succeeded || (inst.succeeded && !login.running)
     login.cancel()
     inst.cancel()
-    exit(login.succeeded ? 0 : 1)
+    exit(ok ? 0 : 1)
 }
 
 // ── CLI：--doctor ──────────────────────────────────────────
@@ -200,12 +260,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             return
         }
         TalkyLog.write("launch build \(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?")")
+        // iPhone 中繼：使用者打開過才會聽（預設關）
+        RelayServer.shared.startIfEnabled()
         // 從 DMG 自己裝完重開會帶 --eject <掛載點>：把磁碟映像退出，桌面不留那顆
         if let i = cliArgs.firstIndex(of: "--eject"), i + 1 < cliArgs.count { Installer.ejectLater(cliArgs[i + 1]) }
         // 第一次從 /Applications 啟動＝釘進 Dock（只做一次；自己拖進去的人也會有）
         if Installer.isRunningFromApplications, !UserDefaults.standard.bool(forKey: "dockPinned") {
             UserDefaults.standard.set(true, forKey: "dockPinned")
-            Dock.ensure(appURL: Installer.installedURL)
+            if Dictation.showInDock { Dock.ensure(appURL: Installer.installedURL) }
         }
         antiNap = ProcessInfo.processInfo.beginActivity(
             options: [.userInitiatedAllowingIdleSystemSleep],
@@ -224,6 +286,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 self.statusItem = nil
             }
         }
+        NotificationCenter.default.addObserver(
+            forName: .talkyDockChanged, object: nil, queue: .main
+        ) { [weak self] _ in self?.applyDockChoice() }
 
         if Bundle.main.bundleIdentifier != nil {
             let center = UNUserNotificationCenter.current()
@@ -391,10 +456,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         if let a = antiNap { ProcessInfo.processInfo.endActivity(a) }
     }
 
-    /// app 已在跑時再點一次 Dock 圖示／啟動台 → 開狀態視窗
+    /// app 已在跑時再點一次 Dock 圖示／啟動台／Spotlight → 開狀態視窗（Dock 圖示關掉的人也靠這條）
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
         if Dictation.onboardingDone { showStatusWindow() } else { showOnboarding() }
         return true
+    }
+
+    /// 設定裡切「在 Dock 顯示 Talky」：當場生效不用重開，連安裝時釘的那顆一起拿掉／放回
+    private func applyDockChoice() {
+        let show = Dictation.showInDock
+        NSApp.setActivationPolicy(show ? .regular : .accessory)
+        if Installer.isRunningFromApplications {
+            if show { Dock.ensure(appURL: Installer.installedURL) } else { Dock.remove(appURL: Installer.installedURL) }
+        }
+        TalkyLog.write("dock: show=\(show)")
+        // 切成 .accessory 時系統會把 app 推到背景：把設定視窗叫回前面，開關的結果看得到
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            NSApp.activate(ignoringOtherApps: true)
+            self?.settingsWindow?.makeKeyAndOrderFront(nil)
+        }
     }
 
     // ── 選單列 ──
@@ -599,8 +679,9 @@ signal(SIGTERM, SIG_IGN)
 let termSource = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
 termSource.setEventHandler { NSApp.terminate(nil) }
 termSource.resume()
-// .regular＝Dock 圖示與 ⌘Tab 都有（Dock 常駐）
-app.setActivationPolicy(.regular)
+// .regular＝Dock 圖示與 ⌘Tab 都有（Dock 常駐，預設）；設定裡關掉 Dock 圖示＝.accessory，只剩選單列狀態燈。
+// Info.plist 的 LSUIElement 是 true，在這裡才決定：關掉的人開機、從 Spotlight 打開時，Dock 不會先跳出圖示再消失。
+app.setActivationPolicy(Dictation.showInDock ? .regular : .accessory)
 Dictation.applyAppearance()  // 設定裡選的跟系統／淺／深
 app.mainMenu = makeMainMenu()
 app.run()

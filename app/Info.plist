@@ -15,15 +15,17 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.1.9</string>
+	<string>0.1.12</string>
 	<key>CFBundleVersion</key>
-	<string>20</string>
+	<string>27</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
 	<key>LSUIElement</key>
-	<false/>
+	<true/>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Talky 只在你按下「在終端機執行」時，替你打開終端機並貼上安裝或登入指令。</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>讓你的 iPhone 版 Talky 連過來，用這台 Mac 登入的 Claude／ChatGPT 訂閱整理與翻譯（設定 → iPhone 打開才會聽）。</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Talky 需要麥克風，才能把你講的話變成文字。聲音只在這台電腦上處理。</string>
 </dict>

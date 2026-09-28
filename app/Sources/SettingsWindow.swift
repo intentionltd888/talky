@@ -1,7 +1,9 @@
 // SettingsWindow — 設定頁（一般／進階）
 //
 // 設定視窗重置：
-//   一般：外觀／快捷鍵（目前＋「重設快捷鍵」錄製面）／常用詞／檢查（重新跑精靈、匯出診斷檔）
+//   一般：外觀／快捷鍵（目前＋「重設快捷鍵」錄製面）／Dock 與選單列／常用詞／檢查（重新跑精靈、匯出診斷檔）
+//   「Dock 與選單列」（issue #1）：要把 Dock 圖示拿掉的人會先找「一般」；狀態燈從進階搬來放它旁邊，
+//   因為兩樣是同一件事（從哪裡打開 Talky），而且至少要留一個——Dock 關著時狀態燈鎖在開，下面寫原因。
 //   進階：讓你的 AI 帶你接好（最上面）／用什麼來整理（三顆可見＋更多選項，整列可點、每顆有測試）／其他
 //   頁尾只留 Powered by（沒做的事寫在 README「還沒做的」節）。
 //   0.1.2 減法（太複雜的收起來）：貼字方式、這台電腦、打開記錄檔、重啟引擎、常用詞檔案路徑 五樣拿掉——
@@ -19,6 +21,7 @@ struct SettingsView: View {
     @State private var glossary = TextUtil.localGlossary() ?? ""
     @State private var glossaryNote = ""
     @State private var statusLight = Dictation.showStatusLight
+    @State private var showInDock = Dictation.showInDock
     @State private var launchAtLogin = AppState.shared.launchAtLoginOn
     @State private var showHotkeySheet = false
     @State private var triggerLabel = Dictation.trigger.longLabel
@@ -76,8 +79,35 @@ struct SettingsView: View {
                     NeuChip(title: "重設快捷鍵") { showHotkeySheet = true }
                 }
             }
+            section("Dock 與選單列") {
+                Toggle(isOn: $showInDock) {
+                    Text("在 Dock 顯示 Talky").font(NeuFont.ui(NeuType.caption)).foregroundColor(Neu.inkStrong)
+                }
+                .toggleStyle(.switch)
+                .onChange(of: showInDock) { _, v in
+                    Dictation.showInDock = v
+                    // 至少留一個入口：Dock 沒有圖示時狀態燈一定要在（改這個 state 會走下面那顆的 onChange 存檔、裝回）
+                    if !v, !statusLight { statusLight = true }
+                    NotificationCenter.default.post(name: .talkyDockChanged, object: nil)
+                }
+                Toggle(isOn: $statusLight) {
+                    Text("在選單列顯示狀態燈").font(NeuFont.ui(NeuType.caption)).foregroundColor(Neu.inkStrong)
+                }
+                .toggleStyle(.switch)
+                .disabled(!showInDock)
+                .onChange(of: statusLight) { _, v in
+                    Dictation.showStatusLight = v
+                    NotificationCenter.default.post(name: .talkyStatusLightChanged, object: nil)
+                }
+                if !showInDock {
+                    NeuNote(text: "Dock 沒有 Talky 時，點選單列的狀態燈打開它，或用 Spotlight 找 Talky。所以這時狀態燈不能關。")
+                }
+            }
             section("翻譯（左 ⌘ 連按兩下）") {
                 TranslateSettingsView()
+            }
+            section("iPhone（用這台 Mac 的訂閱整理與翻譯）") {
+                RelaySettingsView()
             }
             section("常用詞") {
                 NeuNote(text: "人名、公司名打在這裡，會認得。用頓號分隔。")
@@ -133,14 +163,6 @@ struct SettingsView: View {
                 BrainsList(compact: true)
             }
             section("其他") {
-                Toggle(isOn: $statusLight) {
-                    Text("在選單列顯示狀態燈").font(NeuFont.ui(NeuType.caption)).foregroundColor(Neu.inkStrong)
-                }
-                .toggleStyle(.switch)
-                .onChange(of: statusLight) { _, v in
-                    Dictation.showStatusLight = v
-                    NotificationCenter.default.post(name: .talkyStatusLightChanged, object: nil)
-                }
                 Toggle(isOn: $launchAtLogin) {
                     Text("開機時自動啟動 Talky").font(NeuFont.ui(NeuType.caption)).foregroundColor(Neu.inkStrong)
                 }
@@ -161,6 +183,7 @@ struct SettingsView: View {
 
 extension Notification.Name {
     static let talkyStatusLightChanged = Notification.Name("talkyStatusLightChanged")
+    static let talkyDockChanged = Notification.Name("talkyDockChanged")
 }
 
 // ── 重設快捷鍵（錄製面）──

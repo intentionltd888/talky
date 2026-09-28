@@ -20,6 +20,10 @@ Your voice never leaves your computer. Whether the transcript goes to an AI for 
 </p>
 
 <p align="center">
+  Current: v0.1.11 (build 25)
+</p>
+
+<p align="center">
   <img src="docs/images/demo.gif" alt="Double-tap right ⌘ → speak → tap again, tidy text is pasted at the cursor" width="760">
 </p>
 
@@ -79,6 +83,24 @@ Politeness is set once, not per language: pick an **audience** (friend / colleag
   <img src="docs/images/panel_translate.png" alt="Translate mode: click a language chip" width="640">
 </p>
 
+## Prompt mode: say what you need, paste a complete prompt
+
+End a spoken request with "**幫我整理成 prompt**" ("turn this into a prompt"; 寫成提示詞 or 變成更詳細的 prompt count too). That dictation skips ordinary tidying: your Claude Code compiles everything you said into a complete prompt with the goal, why it matters, concrete criteria for top-tier work, the mediocre versions to avoid, scope and deliverables. It takes about 30 seconds and pastes at the cursor so you can read it before sending.
+
+- Say it in your last sentence (one short closing sentence after it is fine, e.g. "we'll decide after that"). Mentioning "prompt" earlier, with more sentences after it, does not trigger it, and neither does anything dictated into LINE, Messages, Slack or Mail.
+- Vague words like "better" or "premium" become criteria you can check against the result. That is the main difference from ordinary tidying.
+- If your tidying option is not Claude Code, Talky pastes your words plus a short instruction so the receiving AI compiles the prompt itself, and the panel says so.
+
+
+## iPhone app: use this Mac's subscription
+
+The iPhone version of Talky (in development, `ios/`) can polish and translate with your Claude Code / ChatGPT (Codex) subscription by going through your own Mac:
+Settings → "iPhone" → turn on → scan the QR code with the iPhone camera.
+
+- Off by default; when on, it listens on port 47810 and only accepts paired iPhones on the same network or Tailscale.
+- Every request is encrypted and authenticated with the pairing key (ChaCha20-Poly1305); nothing goes through a third party. "New pairing code" revokes old iPhones.
+- The iPhone never touches your account: sign-in always happens on the Mac through Anthropic's / OpenAI's own pages (Anthropic does not allow third-party apps to offer Claude subscription login).
+
 ## Website
 
 The full story is at [intentionltd888.github.io/made/talky](https://intentionltd888.github.io/made/talky/): how much faster, messy in / clean out, translate mode, how your voice stays on your Mac, FAQ.
@@ -91,7 +113,7 @@ The full story is at [intentionltd888.github.io/made/talky](https://intentionltd
 
 ## Install
 
-1. [Download Talky.dmg](https://github.com/intentionltd888/talky/releases/latest/download/Talky.dmg), open it, drag Talky into Applications. Or just double-click Talky inside the DMG: it copies itself into Applications, pins itself to the Dock and opens. The DMG is Developer ID signed and notarised by Apple, so there is no security warning.
+1. [Download Talky.dmg](https://github.com/intentionltd888/talky/releases/latest/download/Talky.dmg), open it, drag Talky into Applications. Or just double-click Talky inside the DMG: it copies itself into Applications, pins itself to the Dock and opens. The DMG is Developer ID signed and notarised by Apple, so there is no security warning. Don't want it in the Dock? Settings → General → "Dock and menu bar", turn off "Show Talky in the Dock"; open it from the menu bar status light instead.
 2. Open Talky from Applications. The first launch runs a five-step wizard: Microphone → Accessibility → tidying option → try a sentence → done. All you do by hand: click Allow, flip one switch in System Settings, say one sentence.
 3. **Accessibility cannot be skipped.** Without it, double-tapping right ⌘ does nothing at all (hotkey detection and pasting into other apps both need it). Once granted, the app hooks the hotkey within 2 seconds.
 
@@ -125,6 +147,12 @@ open build/Talky.app
 
 /Applications/Talky.app/Contents/MacOS/Talky --ime-polish "呃就是那個我們明天下午三點要開會嘛,對對對"
 # no UI, no audio: runs the tidying route and prints the result plus the path actually taken
+
+/Applications/Talky.app/Contents/MacOS/Talky --ime-prompt "官網首頁要重做，重點是三秒看懂。幫我整理成 prompt"
+# runs prompt mode's trigger check and compile, prints the prompt that would be pasted
+
+open -n -a Talky --args --mic-test
+# records 1.5 s with Talky's own microphone permission; the result is the last line of the log
 ```
 
 Engine ports are `127.0.0.1:8932` (speech) and `127.0.0.1:8947` (local tidying), bound to localhost only.
@@ -135,7 +163,7 @@ Engine ports are `127.0.0.1:8932` (speech) and `127.0.0.1:8947` (local tidying),
 |---|---|
 | Models | `~/Library/Application Support/Talky/models/` |
 | Glossary | `~/Library/Application Support/Talky/glossary.txt` |
-| Memo (last 20 dictations, click the Dock icon) | Local `UserDefaults`, never leaves the machine |
+| Memo (last 20 dictations, click the Dock icon or the menu bar status light) | Local `UserDefaults`, never leaves the machine |
 | Log | `~/Library/Logs/Talky/talky.log` |
 | Settings | `defaults read ltd.intention.talky` |
 
@@ -153,7 +181,7 @@ Listed honestly so you do not mistake it for a bug:
 ## Issues and contributing
 
 - Something broke: Settings → General → "Export diagnostics to Desktop", then attach that txt to an [issue](https://github.com/intentionltd888/talky/issues/new/choose). It contains no keys.
-- Want to help test: walk through [TESTING.md](TESTING.md), 25 items, each "do one thing, see one result".
+- Want to help test: walk through [TESTING.md](TESTING.md), 29 items, each "do one thing, see one result".
 - Want to change code: read [CONTRIBUTING.md](CONTRIBUTING.md) first. Most of the code comments are in Traditional Chinese.
 
 ## Follow

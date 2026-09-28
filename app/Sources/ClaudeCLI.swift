@@ -398,6 +398,19 @@ enum ClaudeCLI {
         return (out, err)
     }
 
+    /// 一次性長任務入口（prompt 模式）：冷啟、不進常駐會話、失敗不進冷卻。
+    /// 病史：system prompt 跟口述整理不同，走常駐會話會把整理用的那條暖會話殺掉重生（下一句口述又要冷啟）；
+    /// 共用 complete() 的逾時與冷卻，一次長任務逾時就讓接下來 10 分鐘的口述都掉到本機模型。
+    static func completeOnce(
+        system: String, user: String, model: String, effort: String, timeout: TimeInterval
+    ) -> (String?, String?) {
+        if !loggedInNow { return (nil, loginHint) }
+        if coolingDown { return (nil, "Claude Code 冷卻中（前一次失敗）") }
+        return run(
+            system: system, user: user, model: model, effort: effort,
+            replaceSystemPrompt: supportsSystemPrompt, timeoutSecs: timeout)
+    }
+
     // ── 常駐會話 ─────────────────────────────────────────────
     // 冷啟 `claude -p` 每句要付 1.5–2 秒 node 啟動。改成一條
     // `--input-format stream-json --output-format stream-json` 雙向會話常駐：spawn 一次、

@@ -4,6 +4,7 @@
 // DMG 是唯讀映像，拖曳過程不會執行任何程式，所以「拖完自動做事」做不到；能做的是兩條路：
 //   ① 使用者直接雙擊 DMG 裡的 Talky → 這裡接手：問一次 → 複製到 /Applications → 加進 Dock → 從新位置打開 → 退出舊的、退出磁碟映像
 //   ② 使用者照舊拖進「應用程式」再打開 → 第一次從 /Applications 啟動時把自己加進 Dock（只做一次，見 main.swift）
+// 設定裡關掉「在 Dock 顯示 Talky」的人（Dictation.showInDock）兩條路都不釘。
 // 權限（麥克風、輔助使用）綁的是「路徑＋簽名」，所以一定要先落在 /Applications 才開始要權限——這也是舊版直接擋下 /Volumes 的原因。
 import Cocoa
 
@@ -26,7 +27,10 @@ enum Installer {
         if !yes {
             let a = NSAlert()
             a.messageText = "把 Talky 放進「應用程式」？"
-            a.informativeText = "Talky 會自己複製到「應用程式」、加進 Dock，然後從那裡打開。之後直接點 Dock 上的圖示就好。"
+            // 設定裡關掉過 Dock 圖示的人（重裝、更新）：不釘、也不講 Dock
+            a.informativeText = Dictation.showInDock
+                ? "Talky 會自己複製到「應用程式」、加進 Dock，然後從那裡打開。之後直接點 Dock 上的圖示就好。"
+                : "Talky 會自己複製到「應用程式」，然後從那裡打開。"
             a.addButton(withTitle: "放進應用程式並打開")
             a.addButton(withTitle: "我自己拖")
             yes = a.runModal() == .alertFirstButtonReturn
@@ -82,7 +86,7 @@ enum Installer {
         }
         try fm.copyItem(at: src, to: dst)
         TalkyLog.write("installed to \(dst.path) from \(src.path)")
-        Dock.ensure(appURL: dst)
+        if Dictation.showInDock { Dock.ensure(appURL: dst) }
     }
 
     /// 正在跑的這顆若在 /Volumes/<名稱>/ 底下就回那個掛載點；被 App Translocation 搬走的話找 /Volumes/Talky
@@ -121,29 +125,58 @@ enum Installer {
 enum Dock {
     /// 把 app 釘進 Dock（已經在就不動）。改的是 com.apple.dock 的 persistent-apps，重啟 Dock 才會顯示（閃一下，只此一次）。
     @discardableResult static func ensure(appURL: URL) -> Bool {
-        let domain = "com.apple.dock" as CFString
-        let key = "persistent-apps" as CFString
-        var apps = (CFPreferencesCopyAppValue(key, domain) as? [[String: Any]]) ?? []
+        // 病史（潛在）：以前讀不到就當空陣列、補上 Talky 寫回去＝使用者的 Dock 只剩 Talky。讀不到就不動。
+        guard var apps = persistentApps() else { return false }
+        if apps.contains(where: { isTalky($0, appURL: appURL) }) { return false }
         let want = appURL.standardizedFileURL.path
-        let already = apps.contains { tile in
-            guard let td = tile["tile-data"] as? [String: Any],
-                  let fd = td["file-data"] as? [String: Any],
-                  let s = fd["_CFURLString"] as? String,
-                  let u = URL(string: s) else { return false }
-            return u.standardizedFileURL.path == want
-        }
-        if already { return false }
         apps.append([
             "tile-data": ["file-data": ["_CFURLString": "file://\(want)/", "_CFURLStringType": 15]],
             "tile-type": "file-tile",
         ])
+        write(apps)
+        TalkyLog.write("dock: pinned \(want)")
+        return true
+    }
+
+    /// 設定裡關掉「在 Dock 顯示 Talky」：連安裝時釘的那顆一起拿掉——只拿掉執行中的圖示、釘的那顆還在，
+    /// 使用者會以為開關壞了。沒釘就不動、不重啟 Dock。
+    @discardableResult static func remove(appURL: URL) -> Bool {
+        guard let apps = persistentApps() else { return false }
+        let kept = apps.filter { !isTalky($0, appURL: appURL) }
+        guard kept.count < apps.count else { return false }
+        write(kept)
+        TalkyLog.write("dock: unpinned \(apps.count - kept.count) tile(s)")
+        return true
+    }
+
+    /// Dock 上釘了幾顆 Talky（只讀，--doctor 用）
+    static func pinnedCount(appURL: URL) -> Int {
+        persistentApps()?.filter { isTalky($0, appURL: appURL) }.count ?? 0
+    }
+
+    private static let domain = "com.apple.dock" as CFString
+    private static let key = "persistent-apps" as CFString
+
+    private static func persistentApps() -> [[String: Any]]? {
+        CFPreferencesCopyAppValue(key, domain) as? [[String: Any]]
+    }
+
+    /// 同一個 app：路徑相同（我們自己釘的那顆），或 Dock 記的 bundle id 是 Talky（使用者自己拖上去的那顆）
+    private static func isTalky(_ tile: [String: Any], appURL: URL) -> Bool {
+        guard let td = tile["tile-data"] as? [String: Any] else { return false }
+        if let bid = td["bundle-identifier"] as? String, bid == Bundle.main.bundleIdentifier { return true }
+        guard let fd = td["file-data"] as? [String: Any],
+              let s = fd["_CFURLString"] as? String,
+              let u = URL(string: s) else { return false }
+        return u.standardizedFileURL.path == appURL.standardizedFileURL.path
+    }
+
+    private static func write(_ apps: [[String: Any]]) {
         CFPreferencesSetAppValue(key, apps as CFArray, domain)
         CFPreferencesAppSynchronize(domain)
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/killall")
         p.arguments = ["Dock"]
         try? p.run()
-        TalkyLog.write("dock: pinned \(want)")
-        return true
     }
 }

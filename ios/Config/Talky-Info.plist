@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- 鍵盤按麥克風時用 talky://listen 叫醒主 app（鍵盤擴充自己不能開麥克風） -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>ltd.intention.talky.ios</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>talky</string>
+			</array>
+		</dict>
+	</array>
+	<!-- 連到自己的 Mac（Mac 版 Talky → 設定 → iPhone）用它的訂閱整理與翻譯：區網連線要先問使用者 -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Talky 要連到你自己的 Mac，用你在那台 Mac 上登入的 Claude／ChatGPT 訂閱整理和翻譯。內容加密，只在你的網路裡。</string>
+	<!-- 自架的整理服務位址（選用）：ios/install.sh 從 ~/.config/talky/ios-bridge-url 帶進來；公開原始碼裡是空的 -->
+	<key>TalkyBridgeURL</key>
+	<string>$(TALKY_BRIDGE_URL)</string>
+	<!-- 待命＝麥克風在背景持續開著，回到別的 App 也能直接講 -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
+</dict>
+</plist>

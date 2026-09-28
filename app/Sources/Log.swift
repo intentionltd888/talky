@@ -27,6 +27,9 @@ enum TalkyLog {
         }
     }
 
+    /// 等排隊中的記錄寫完（命令列模式馬上 exit 前用；不等的話最後一行會掉）
+    static func flush() { q.sync {} }
+
     private static func rotateIfNeeded() {
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: file.path),
             let size = attrs[.size] as? Int, size > maxBytes

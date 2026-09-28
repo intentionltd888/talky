@@ -40,6 +40,14 @@ enum Diagnostics {
             hk = (false, "app 還沒回報（剛開？等 2 秒再跑一次；0.1.0 版沒有這行）")
         }
         line(hk.0, "快捷鍵", hk.1)
+        // Dock 圖示（issue #1）：顯示、隱藏都是正常選擇；兩個入口都關了（只能手改 defaults 做到）才算缺
+        let pinned = Dock.pinnedCount(appURL: Installer.installedURL)
+        line(
+            Dictation.showInDock || Dictation.showStatusLight, "Dock 圖示",
+            Dictation.showInDock
+                ? (pinned > 0 ? "顯示（釘在 Dock）" : "顯示（沒釘，Talky 在跑時才出現）")
+                : (Dictation.showStatusLight ? "隱藏：從選單列狀態燈打開 Talky" : "隱藏，狀態燈也關了：只能從 Spotlight 打開 Talky")
+                    + (pinned > 0 ? "（Dock 裡還釘著 \(pinned) 顆）" : ""))
         line(TextUtil.whisperModelPath() != nil, "語音模型", TextUtil.whisperModelPath() ?? "未下載")
         line(LocalLLM.modelPath() != nil, "整理模型", LocalLLM.modelPath() ?? "未下載（走 Claude Code 就不需要）")
         let cst = ClaudeCLI.available ? ClaudeCLI.authStatus() : nil
@@ -115,7 +123,7 @@ enum Diagnostics {
         var s = report()
         s += "\n\n── 設定（金鑰永不列）──\n"
         let keys = [
-            "polishMode", "hotkeyTrigger", "pasteMode", "appearance", "statusLight", "onboardingDone",
+            "polishMode", "hotkeyTrigger", "pasteMode", "appearance", "statusLight", "showInDock", "onboardingDone",
             "ollamaModel", "ollamaResolvedModel", "openaiBase", "openaiModel", "anthropicBase", "anthropicModel",
             "claudeModel", "claudeEffort", "claudeTimeout", "imeLite", "hotkeyListenerOK", "axTrustedReported", "micGrantedReported",
         ]
